@@ -1,0 +1,1384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VRM Model Viewer</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #222;
+            color: white;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        
+        #container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+            max-width: 300px;
+            display: none;
+        }
+        
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+            display: none; /* Hidden by default */
+            transition: opacity 0.3s ease;
+        }
+        
+        #controls.visible {
+            display: block;
+        }
+        
+        #contextMenu {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.9);
+            border: 1px solid #555;
+            border-radius: 5px;
+            padding: 5px 0;
+            min-width: 150px;
+            z-index: 1000;
+            display: none;
+            color: white;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+        }
+        
+        .context-menu-item {
+            padding: 8px 15px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .context-menu-item:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        
+        .context-menu-separator {
+            height: 1px;
+            background-color: #555;
+            margin: 5px 0;
+        }
+        
+        .control-group {
+            margin-bottom: 10px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        
+        select, button {
+            width: 100%;
+            padding: 5px;
+            margin-bottom: 5px;
+        }
+        
+        input[type="checkbox"] {
+            margin-right: 5px;
+        }
+        
+        label input[type="checkbox"] {
+            width: auto;
+        }
+        
+        input[type="range"] {
+            width: 80%;
+            margin-right: 10px;
+        }
+        
+        input[type="color"] {
+            width: 60px;
+            height: 30px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            margin-right: 5px;
+        }
+        
+        input[type="text"] {
+            padding: 5px;
+            border: 1px solid #555;
+            border-radius: 3px;
+            background: #333;
+            color: white;
+        }
+        
+        #mouthValue {
+            font-family: monospace;
+            font-weight: bold;
+            min-width: 40px;
+            display: inline-block;
+        }
+        
+        #status {
+            margin-top: 10px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="info">
+            <h3>VRM Model Viewer</h3>
+            <div id="status">Loading...</div>
+        </div>
+        
+        <div id="controls">
+            <div class="control-group">
+                <label>Expressions:</label>
+                <select id="expressionSelect"></select>
+                <button onclick="setExpressionFromSelect()">Set Expression</button>
+            </div>
+            
+            <div class="control-group">
+                <label>Mouth Opening:</label>
+                <input type="range" id="mouthSlider" min="0" max="1" step="0.01" value="0" oninput="setMouthFromSlider()">
+                <span id="mouthValue">0.00</span>
+            </div>
+            
+            <div class="control-group">
+                <label>Light Color:</label>
+                <input type="color" id="lightColorPicker" value="#ffffff" onchange="setLightColorFromPicker()">
+                <button onclick="resetLightColor()">Reset</button>
+            </div>
+            
+            <div class="control-group">
+                <label>Background:</label>
+                <input type="text" id="backgroundInput" placeholder="Color (#FF0000) or Image URL" style="width: 70%; margin-right: 5px;">
+                <button onclick="setBackgroundFromInput()">Set</button>
+                <br>
+                <input type="color" id="backgroundColorPicker" value="#000000" onchange="setBackgroundColorFromPicker()" style="margin-top: 5px;">
+                <label for="backgroundColorPicker" style="font-size: 12px;">Quick color</label>
+            </div>
+            
+            <div class="control-group">
+                <label>Motions:</label>
+                <select id="motionSelect"></select>
+                <label>
+                    <input type="checkbox" id="loopMotion"> Loop motion
+                </label>
+                <button onclick="doMotionFromSelect()">Play Motion</button>
+                <button onclick="stopCurrentMotion()">Stop Motion</button>
+            </div>
+            
+            <div class="control-group">
+                <button onclick="resetPose()">Reset Pose</button>
+            </div>
+        </div>
+        
+        <!-- Context Menu -->
+        <div id="contextMenu">
+            <div class="context-menu-item" onclick="toggleControls()">
+                <span id="toggleControlsText">Show Controls</span>
+                <span style="float: right; opacity: 0.7; font-size: 12px;">C</span>
+            </div>
+            <div class="context-menu-separator"></div>
+            <div class="context-menu-item" onclick="resetPose()">Reset Pose</div>
+            <div class="context-menu-item" onclick="resetLightColor()">Reset Lighting</div>
+            <div class="context-menu-item" onclick="set_background('#000000')">Reset Background</div>
+        </div>
+    </div>
+
+    <!-- Three.js and VRM dependencies -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.152.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.152.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { BVHLoader } from 'three/addons/loaders/BVHLoader.js';
+        import { VRMLoaderPlugin, VRMUtils } from 'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.1.2/lib/three-vrm.module.js';
+        
+        // Make THREE and other classes globally available
+        window.THREE = THREE;
+        window.OrbitControls = OrbitControls;
+        window.GLTFLoader = GLTFLoader;
+        window.BVHLoader = BVHLoader;
+        window.VRMLoaderPlugin = VRMLoaderPlugin;
+        window.VRMUtils = VRMUtils;
+        
+        // Signal that modules are loaded
+        window.modulesLoaded = true;
+    </script>
+
+    <script>
+        // Global variables
+        let scene, camera, renderer, controls;
+        let vrm = null;
+        let clock;
+        let currentVrmUrl = '';
+        let availableExpressions = [];
+        let availableMotions = [];
+        let currentMotion = null;
+        let mixer = null;
+        let idleMotion = null;
+        let isIdleAnimationActive = false;
+        let availableIdleAnimations = [];
+        let currentIdleIndex = 0;
+        let idleAnimationTimer = null;
+
+        // Initialize the 3D scene
+        function initScene() {
+            // Initialize clock now that THREE is available
+            clock = new THREE.Clock();
+            
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000); // Default to black, will be updated by URL param
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 1.5, 3);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.getElementById('container').appendChild(renderer.domElement);
+
+            // Controls
+            controls = new window.OrbitControls(camera, renderer.domElement);
+            controls.target.set(0, 1, 0);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(1, 1, 1);
+            directionalLight.castShadow = true;
+            scene.add(directionalLight);
+
+            // Grid removed - no longer adding grid to scene
+        }
+
+        // Load VRM model
+        async function loadVRM(url) {
+            try {
+                updateStatus('Loading VRM model...');
+                
+                // Remove existing VRM
+                if (vrm) {
+                    scene.remove(vrm.scene);
+                    vrm = null;
+                }
+
+                // Load new VRM
+                const loader = new window.GLTFLoader();
+                loader.register((parser) => {
+                    return new window.VRMLoaderPlugin(parser);
+                });
+                
+                const gltf = await new Promise((resolve, reject) => {
+                    loader.load(url, resolve, undefined, reject);
+                });
+
+                vrm = gltf.userData.vrm;
+                scene.add(vrm.scene);
+
+                // Position model to face the viewer
+                vrm.scene.rotation.y = Math.PI; // Rotate 180 degrees to face camera
+
+                // Set up animation mixer
+                mixer = new THREE.AnimationMixer(vrm.scene);
+                
+                // Configure mixer for smoother blending
+                mixer.timeScale = 1.0;
+                
+                // Enable smoother crossfading by allowing multiple actions
+                mixer._actions = mixer._actions || [];
+
+                // Get available expressions
+                availableExpressions = get_expressions();
+                console.log('Available expressions:', availableExpressions);
+                updateExpressionSelect();
+
+                // Try to load motion files (this would need to be adapted based on your BVH file structure)
+                await loadAvailableMotions();
+
+                // Start idle animation
+                await startIdleAnimation();
+
+                updateStatus(`VRM model loaded successfully`);
+                console.log('VRM loaded:', vrm);
+                
+            } catch (error) {
+                updateStatus(`Error loading VRM: ${error.message}`);
+                console.error('Error loading VRM:', error);
+            }
+        }
+
+        // Load available motion files (BVH)
+        async function loadAvailableMotions() {
+            try {
+                // Try to dynamically discover animations by testing common patterns
+                const animationFiles = await discoverAnimationsFromPatterns();
+                
+                if (animationFiles.length > 0) {
+                    availableMotions = animationFiles;
+                    updateMotionSelect();
+                    updateStatus(`Loaded ${animationFiles.length} animations dynamically`);
+                } else {
+                    // Fallback to the known list if discovery doesn't work
+                    console.warn('Could not discover animations dynamically, using fallback list');
+                    await loadFallbackAnimations();
+                    return;
+                }
+                
+                // Discover and prepare idle animations
+                await discoverIdleAnimations();
+                
+            } catch (error) {
+                console.warn('Failed to load animations dynamically, using fallback:', error);
+                await loadFallbackAnimations();
+            }
+        }
+
+        // Dynamically discover animations by testing patterns and known prefixes
+        async function discoverAnimationsFromPatterns() {
+            const discoveredAnimations = [];
+            
+            // Common animation prefixes and patterns to test
+            const patterns = [
+                // Actions
+                'action_attention_seeking', 'action_crawling', 'action_crouch', 'action_gaming',
+                'action_greeting1', 'action_greeting', 'action_jog', 'action_jump', 'action_laydown',
+                'action_pat', 'action_pickingup', 'action_run', 'action_standup', 'action_walk',
+                
+                // Emotions
+                'admiration', 'admiration2', 'admiration3', 'amusement', 'amusement2', 'amusement3',
+                'anger', 'anger2', 'anger3', 'annoyance', 'annoyance1', 'approval', 'approval2', 'approval3',
+                'caring', 'caring1', 'confusion', 'confusion2', 'confusion3', 'curiosity', 'curiosity2', 'curiosity3',
+                'desire', 'desire1', 'desire2', 'disappointment', 'disappointment2', 'disapproval', 'disaproval1',
+                'disgust', 'disgust1', 'disgust2', 'embarrassment', 'excitement', 'excitement2', 'excitement3',
+                'fear', 'fear2', 'fear3', 'gratitude', 'grief', 'joy', 'joy2', 'joy3', 'love', 'love2', 'love3',
+                'nervousness', 'nervousnes3', 'nervousness2', 'optimism', 'pride', 'pride2', 'realization',
+                'relief', 'relief1', 'remorse', 'remorse2', 'remorse3', 'sadness', 'sadness2', 'surprise', 'surprise2',
+                
+                // Dances
+                'dance_1', 'dance_2', 'dance_backup', 'dance_dab', 'dance_gangnam_style', 'dance_headdrop',
+                'dance_marachinostep', 'dance_northern_soul_spin', 'dance_ontop', 'dance_pushback', 'dance_rumba',
+                
+                // Exercises
+                'exercise_crunch', 'exercise_crunches', 'exercise_jogging', 'exercise_jumping_jacks',
+                
+                // Hit areas
+                'hitarea_butt', 'hitarea_chest', 'hitarea_foot', 'hitarea_groin', 'hitarea_hands', 'hitarea_head', 'hitarea_leg',
+                
+                // Reactions
+                'reaction_groinhit', 'reaction_headshot',
+                
+                // Idle animations (most important for our use case)
+                'neutral_idle', 'neutral_idle2', 'neutral', 'neutral2', 'neutral3', 'neutral4',
+                'sit_idle', 'sit_idle2', 'sit_idle3', 'sit_idle4',
+                'kneel_idle', 'kneel_idle2',
+                'laying_idle', 'laying_idle2', 'laying_idle3'
+            ];
+            
+            // Test each pattern to see if the file exists
+            const testPromises = patterns.map(async (pattern) => {
+                try {
+                    const response = await fetch(`animations/${pattern}.bvh`, { method: 'HEAD' });
+                    if (response.ok) {
+                        return `${pattern}.bvh`;
+                    }
+                } catch (error) {
+                    // File doesn't exist or can't be accessed
+                }
+                return null;
+            });
+            
+            const results = await Promise.all(testPromises);
+            const foundAnimations = results.filter(result => result !== null);
+            
+            console.log(`Discovered ${foundAnimations.length} animations dynamically`);
+            return foundAnimations;
+        }
+
+        // Fallback function with the original hardcoded list
+        async function loadFallbackAnimations() {
+            const animationFiles = [
+                'action_attention_seeking.bvh',
+                'action_crawling.bvh',
+                'action_crouch.bvh',
+                'action_gaming.bvh',
+                'action_greeting1.bvh',
+                'action_greeting.bvh',
+                'action_jog.bvh',
+                'action_jump.bvh',
+                'action_laydown.bvh',
+                'action_pat.bvh',
+                'action_pickingup.bvh',
+                'action_run.bvh',
+                'action_standup.bvh',
+                'action_walk.bvh',
+                'admiration2.bvh',
+                'admiration3.bvh',
+                'admiration.bvh',
+                'amusement2.bvh',
+                'amusement3.bvh',
+                'amusement.bvh',
+                'anger2.bvh',
+                'anger3.bvh',
+                'anger.bvh',
+                'annoyance1.bvh',
+                'annoyance.bvh',
+                'approval2.bvh',
+                'approval3.bvh',
+                'approval.bvh',
+                'caring1.bvh',
+                'caring.bvh',
+                'confusion2.bvh',
+                'confusion3.bvh',
+                'confusion.bvh',
+                'curiosity2.bvh',
+                'curiosity3.bvh',
+                'curiosity.bvh',
+                'dance_1.bvh',
+                'dance_2.bvh',
+                'dance_backup.bvh',
+                'dance_dab.bvh',
+                'dance_gangnam_style.bvh',
+                'dance_headdrop.bvh',
+                'dance_marachinostep.bvh',
+                'dance_northern_soul_spin.bvh',
+                'dance_ontop.bvh',
+                'dance_pushback.bvh',
+                'dance_rumba.bvh',
+                'desire1.bvh',
+                'desire2.bvh',
+                'desire.bvh',
+                'disappointment2.bvh',
+                'disappointment.bvh',
+                'disapproval.bvh',
+                'disaproval1.bvh',
+                'disgust1.bvh',
+                'disgust2.bvh',
+                'disgust.bvh',
+                'embarrassment.bvh',
+                'excitement2.bvh',
+                'excitement3.bvh',
+                'excitement.bvh',
+                'exercise_crunch.bvh',
+                'exercise_crunches.bvh',
+                'exercise_jogging.bvh',
+                'exercise_jumping_jacks.bvh',
+                'fear2.bvh',
+                'fear3.bvh',
+                'fear.bvh',
+                'gratitude.bvh',
+                'grief.bvh',
+                'hitarea_butt.bvh',
+                'hitarea_chest.bvh',
+                'hitarea_foot.bvh',
+                'hitarea_groin.bvh',
+                'hitarea_hands.bvh',
+                'hitarea_head.bvh',
+                'hitarea_leg.bvh',
+                'joy2.bvh',
+                'joy3.bvh',
+                'joy.bvh',
+                'kneel_idle2.bvh',
+                'kneel_idle.bvh',
+                'laying_idle2.bvh',
+                'laying_idle3.bvh',
+                'laying_idle.bvh',
+                'love2.bvh',
+                'love3.bvh',
+                'love.bvh',
+                'nervousnes3.bvh',
+                'nervousness2.bvh',
+                'nervousness.bvh',
+                'neutral2.bvh',
+                'neutral3.bvh',
+                'neutral4.bvh',
+                'neutral.bvh',
+                'neutral_idle2.bvh',
+                'neutral_idle.bvh',
+                'optimism.bvh',
+                'pride2.bvh',
+                'pride.bvh',
+                'reaction_groinhit.bvh',
+                'reaction_headshot.bvh',
+                'realization.bvh',
+                'relief1.bvh',
+                'relief.bvh',
+                'remorse2.bvh',
+                'remorse3.bvh',
+                'remorse.bvh',
+                'sadness2.bvh',
+                'sadness.bvh',
+                'sit_idle2.bvh',
+                'sit_idle3.bvh',
+                'sit_idle4.bvh',
+                'sit_idle.bvh',
+                'surprise2.bvh',
+                'surprise.bvh'
+            ];
+            
+            availableMotions = animationFiles;
+            updateMotionSelect();
+            updateStatus(`Loaded ${animationFiles.length} animations (fallback)`);
+            
+            // Discover and prepare idle animations
+            await discoverIdleAnimations();
+        }
+
+        // Update UI selects
+        function updateExpressionSelect() {
+            const select = document.getElementById('expressionSelect');
+            select.innerHTML = '<option value="">Select expression...</option>';
+            console.log('Updating expression select with:', availableExpressions);
+            availableExpressions.forEach(expr => {
+                const option = document.createElement('option');
+                option.value = expr;
+                option.textContent = expr;
+                select.appendChild(option);
+            });
+        }
+
+        function updateMotionSelect() {
+            const select = document.getElementById('motionSelect');
+            select.innerHTML = '<option value="">Select motion...</option>';
+            availableMotions.forEach(motion => {
+                const option = document.createElement('option');
+                option.value = motion;
+                // Format the motion name for display (remove .bvh and format)
+                const displayName = motion.replace('.bvh', '')
+                    .replace(/_/g, ' ')
+                    .replace(/\b\w/g, l => l.toUpperCase());
+                option.textContent = displayName;
+                select.appendChild(option);
+            });
+        }
+
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+        }
+
+        // API Functions as requested
+        function set_expression(expressionName, weight = 1.0) {
+            if (!vrm || !vrm.expressionManager) {
+                console.warn('VRM not loaded or no expression manager');
+                return false;
+            }
+
+            try {
+                // Reset all expressions first
+                for (const expression in vrm.expressionManager.expressionMap) {
+                    vrm.expressionManager.setValue(expression, 0.0);
+                }
+
+                // Set the requested expression
+                vrm.expressionManager.setValue(expressionName, weight);
+                vrm.expressionManager.update();
+                
+                console.log(`Set expression: ${expressionName} with weight: ${weight}`);
+                updateStatus(`Expression set: ${expressionName}`);
+                return true;
+            } catch (error) {
+                console.error('Error setting expression:', error);
+                updateStatus(`Error setting expression: ${expressionName}`);
+                return false;
+            }
+        }
+
+        function get_expressions() {
+            if (!vrm || !vrm.expressionManager) {
+                return [];
+            }
+
+            return Object.keys(vrm.expressionManager.expressionMap);
+        }
+
+        function set_mouth_y(value) {
+            if (!vrm || !vrm.expressionManager) {
+                console.warn('VRM not loaded or no expression manager');
+                return false;
+            }
+
+            // Clamp value between 0 and 1
+            const clampedValue = Math.max(0, Math.min(1, value));
+
+            try {
+                // Set mouth opening using the "aa" expression which controls mouth Y position
+                // This is the standard VRM expression for mouth opening
+                vrm.expressionManager.setValue("aa", clampedValue);
+                vrm.expressionManager.update();
+                
+                console.log(`Set mouth Y: ${clampedValue}`);
+                updateStatus(`Mouth Y set: ${clampedValue.toFixed(2)}`);
+                return true;
+            } catch (error) {
+                console.error('Error setting mouth Y:', error);
+                updateStatus(`Error setting mouth Y: ${error.message}`);
+                return false;
+            }
+        }
+
+        function set_light_color(colorString) {
+            if (!scene) {
+                console.warn('Scene not initialized');
+                return false;
+            }
+
+            try {
+                // Parse color from various formats
+                let color;
+                if (colorString.startsWith('#')) {
+                    // Hex color (e.g., #ff0000 or #ff0000ff)
+                    color = new THREE.Color(colorString.substring(0, 7)); // Ignore alpha for now
+                } else if (colorString.startsWith('0x')) {
+                    // Hex with 0x prefix (e.g., 0xff0000)
+                    color = new THREE.Color(parseInt(colorString, 16));
+                } else if (colorString.includes(',')) {
+                    // RGB values (e.g., 255,0,0)
+                    const [r, g, b] = colorString.split(',').map(v => parseInt(v.trim()) / 255);
+                    color = new THREE.Color(r, g, b);
+                } else {
+                    // CSS color names (e.g., red, blue, white)
+                    color = new THREE.Color(colorString);
+                }
+
+                // Update all directional lights in the scene
+                scene.traverse((child) => {
+                    if (child instanceof THREE.DirectionalLight) {
+                        child.color = color;
+                    }
+                });
+
+                console.log(`Set light color: ${colorString}`);
+                updateStatus(`Light color: ${colorString}`);
+                return true;
+            } catch (error) {
+                console.error('Error setting light color:', error);
+                updateStatus(`Error setting light color: ${error.message}`);
+                return false;
+            }
+        }
+
+        function set_background(backgroundString) {
+            if (!scene) {
+                console.warn('Scene not initialized');
+                return false;
+            }
+
+            try {
+                // Check if it's an image URL (contains common image extensions or http/https)
+                const isImageUrl = /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(backgroundString) || 
+                                   backgroundString.startsWith('http') || 
+                                   backgroundString.startsWith('data:image');
+
+                if (isImageUrl) {
+                    // Load image as background
+                    const loader = new THREE.TextureLoader();
+                    loader.load(
+                        backgroundString,
+                        (texture) => {
+                            scene.background = texture;
+                            console.log(`Set background image: ${backgroundString}`);
+                            updateStatus(`Background image set`);
+                        },
+                        (progress) => {
+                            console.log('Loading background image...', progress);
+                        },
+                        (error) => {
+                            console.error('Error loading background image:', error);
+                            updateStatus(`Error loading background image`);
+                        }
+                    );
+                } else {
+                    // Treat as color
+                    let color;
+                    if (backgroundString.startsWith('#')) {
+                        // Hex color (e.g., #ff0000 or #ff0000ff)
+                        color = new THREE.Color(backgroundString.substring(0, 7)); // Ignore alpha for now
+                    } else if (backgroundString.startsWith('0x')) {
+                        // Hex with 0x prefix (e.g., 0xff0000)
+                        color = new THREE.Color(parseInt(backgroundString, 16));
+                    } else if (backgroundString.includes(',')) {
+                        // RGB values (e.g., 255,0,0)
+                        const [r, g, b] = backgroundString.split(',').map(v => parseInt(v.trim()) / 255);
+                        color = new THREE.Color(r, g, b);
+                    } else {
+                        // CSS color names (e.g., red, blue, white)
+                        color = new THREE.Color(backgroundString);
+                    }
+
+                    scene.background = color;
+                    console.log(`Set background color: ${backgroundString}`);
+                    updateStatus(`Background color: ${backgroundString}`);
+                }
+
+                return true;
+            } catch (error) {
+                console.error('Error setting background:', error);
+                updateStatus(`Error setting background: ${error.message}`);
+                return false;
+            }
+        }
+
+        function do_motion(motionName, loop = false) {
+            if (!vrm || !mixer) {
+                console.warn('VRM not loaded or no animation mixer');
+                return false;
+            }
+
+            try {
+                // Load and play BVH file with proper bone mapping
+                const bvhPath = `animations/${motionName}.bvh`;
+                
+                updateStatus(`Loading motion: ${motionName}...`);
+                
+                // Use the proper BVH loading function that handles bone mapping
+                loadBVHAnimationForVRM(bvhPath, vrm).then((animationClip) => {
+                    if (animationClip) {
+                        // Create action from the converted clip
+                        const newAction = mixer.clipAction(animationClip, vrm.scene);
+                        newAction.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce);
+                        newAction.clampWhenFinished = !loop;
+                        
+                        // Smooth transition from current animation
+                        const fadeTime = 0.5; // 500ms fade
+                        
+                        // Fade out current motion if exists
+                if (currentMotion) {
+                            currentMotion.fadeOut(fadeTime);
+                            updateStatus(`Transitioning to: ${motionName}...`);
+                }
+
+                        // Fade out idle animation if active
+                        if (idleMotion && isIdleAnimationActive) {
+                            idleMotion.fadeOut(fadeTime);
+                            isIdleAnimationActive = false;
+                        }
+                        
+                        // Start new animation with fade in
+                        newAction.reset();
+                        newAction.fadeIn(fadeTime);
+                        newAction.play();
+                        
+                        currentMotion = newAction;
+                        
+                        // Update status after fade completes
+                        setTimeout(() => {
+                            updateStatus(`Playing motion: ${motionName} ${loop ? '(looping)' : '(once)'}`);
+                        }, fadeTime * 1000);
+                        console.log(`Playing motion: ${motionName}, loop: ${loop}`);
+                        
+                        // Set up event listener for when animation finishes
+                        if (!loop) {
+                            // Create a one-time event handler for this specific action
+                            const finishHandler = (event) => {
+                                if (event.action === newAction) {
+                                    updateStatus(`Motion finished: ${motionName}`);
+                                    currentMotion = null;
+                                    
+                                    // Remove this specific event listener
+                                    mixer.removeEventListener('finished', finishHandler);
+                                    
+                                    // Resume idle animation when motion finishes with smooth transition
+                                    console.log('Motion finished, resuming idle animation');
+                                    setTimeout(() => resumeIdleAnimationSmooth(), 200);
+                                }
+                            };
+                            
+                            mixer.addEventListener('finished', finishHandler);
+                        }
+                    } else {
+                        updateStatus(`Failed to convert motion: ${motionName}`);
+                        // Resume idle if motion failed to load
+                        setTimeout(() => resumeIdleAnimationSmooth(), 100);
+                    }
+                }).catch((error) => {
+                    console.error('Error loading BVH:', error);
+                    updateStatus(`Error loading motion: ${motionName} - ${error.message}`);
+                    // Resume idle if motion failed to load
+                    setTimeout(() => resumeIdleAnimationSmooth(), 100);
+                });
+                
+                return true;
+            } catch (error) {
+                console.error('Error playing motion:', error);
+                updateStatus(`Error playing motion: ${motionName} - ${error.message}`);
+                // Resume idle if motion failed to play
+                setTimeout(() => resumeIdleAnimationSmooth(), 100);
+                return false;
+            }
+        }
+
+        // BVH Animation loader with proper bone mapping for VRM
+        async function loadBVHAnimationForVRM(url, vrm) {
+            const loader = new window.BVHLoader();
+            return loader.loadAsync(url).then((result) => {
+                const clip = result.clip;
+                const tracks = []; // KeyframeTracks compatible with VRM will be added here
+
+                const restRotationInverse = new THREE.Quaternion();
+                const parentRestWorldRotation = new THREE.Quaternion();
+                const _quatA = new THREE.Quaternion();
+
+                // Get VRM hips height for scaling
+                const vrmHipsNode = vrm.humanoid?.getNormalizedBoneNode('hips');
+                const vrmHipsHeight = vrmHipsNode ? vrmHipsNode.position.y : 1;
+                
+                // Get BVH hips height
+                const motionHipsHeight = result.skeleton.getBoneByName("hips") ? 
+                    result.skeleton.getBoneByName("hips").position.y : 1;
+                const hipsPositionScale = vrmHipsHeight / motionHipsHeight;
+
+                clip.tracks.forEach((track) => {
+                    // Convert each track for VRM use
+                    const trackSplitted = track.name.split('.');
+                    const vrmBoneName = trackSplitted[0];
+                    const vrmNodeName = vrm.humanoid?.getNormalizedBoneNode(vrmBoneName)?.name;
+                    const bvhRigNode = result.skeleton.getBoneByName(vrmBoneName);
+
+                    if (vrmNodeName != null && bvhRigNode) {
+                        const propertyName = trackSplitted[1];
+
+                        // Store rotations of rest-pose
+                        bvhRigNode.getWorldQuaternion(restRotationInverse).invert();
+                        if (bvhRigNode.parent) {
+                            bvhRigNode.parent.getWorldQuaternion(parentRestWorldRotation);
+                        } else {
+                            parentRestWorldRotation.identity();
+                        }
+
+                        if (track instanceof THREE.QuaternionKeyframeTrack) {
+                            // Retarget rotation of bvhRig to NormalizedBone
+                            for (let i = 0; i < track.values.length; i += 4) {
+                                const flatQuaternion = track.values.slice(i, i + 4);
+                                _quatA.fromArray(flatQuaternion);
+
+                                // Apply bone mapping transformation
+                                _quatA
+                                    .premultiply(parentRestWorldRotation)
+                                    .multiply(restRotationInverse);
+
+                                _quatA.toArray(flatQuaternion);
+                                flatQuaternion.forEach((v, index) => {
+                                    track.values[index + i] = v;
+                                });
+                            }
+
+                            tracks.push(
+                                new THREE.QuaternionKeyframeTrack(
+                                    `${vrmNodeName}.${propertyName}`,
+                                    track.times,
+                                    track.values.map((v, i) => (vrm.meta?.metaVersion === '0' && i % 2 === 0 ? -v : v)),
+                                ),
+                            );
+
+                        } else if (track instanceof THREE.VectorKeyframeTrack) {
+                            const value = track.values.map((v, i) => (vrm.meta?.metaVersion === '0' && i % 3 !== 1 ? -v : v) * hipsPositionScale);
+                            tracks.push(new THREE.VectorKeyframeTrack(`${vrmNodeName}.${propertyName}`, track.times, value));
+                        }
+                    }
+                });
+
+                return new THREE.AnimationClip('vrmAnimationBVH', clip.duration, tracks);
+            });
+        }
+
+        // Idle Animation Management
+        async function discoverIdleAnimations() {
+            // Find all idle-related animations from the available motions
+            // This now works with any dynamically discovered animations
+            const idleAnimations = availableMotions.filter(motion => {
+                const motionLower = motion.toLowerCase();
+                return motionLower.includes('idle') || 
+                       motionLower.includes('neutral');
+            });
+
+            // Sort by preference (neutral_idle first, then other neutrals, then other idles)
+            const sortedIdle = idleAnimations.sort((a, b) => {
+                const aLower = a.toLowerCase();
+                const bLower = b.toLowerCase();
+                
+                // Prioritize neutral_idle
+                if (aLower.includes('neutral_idle') && !bLower.includes('neutral_idle')) return -1;
+                if (!aLower.includes('neutral_idle') && bLower.includes('neutral_idle')) return 1;
+                
+                // Then prioritize any neutral
+                if (aLower.includes('neutral') && !bLower.includes('neutral')) return -1;
+                if (!aLower.includes('neutral') && bLower.includes('neutral')) return 1;
+                
+                // Then prioritize standing idles over sitting/laying
+                if (!aLower.includes('sit') && !aLower.includes('kneel') && !aLower.includes('lay') &&
+                    (bLower.includes('sit') || bLower.includes('kneel') || bLower.includes('lay'))) return -1;
+                if ((aLower.includes('sit') || aLower.includes('kneel') || aLower.includes('lay')) &&
+                    !bLower.includes('sit') && !bLower.includes('kneel') && !bLower.includes('lay')) return 1;
+                
+                // Finally, sort alphabetically
+                return a.localeCompare(b);
+            });
+
+            availableIdleAnimations = sortedIdle;
+            currentIdleIndex = 0;
+            
+            console.log(`Discovered ${availableIdleAnimations.length} idle animations:`, availableIdleAnimations.map(anim => anim.replace('.bvh', '')));
+            
+            if (availableIdleAnimations.length === 0) {
+                console.warn('No idle animations found! The character will remain static when not performing actions.');
+            }
+            
+            return availableIdleAnimations;
+        }
+
+        async function startIdleAnimation() {
+            if (!vrm || !mixer) {
+                return;
+            }
+
+            // Stop any existing idle animation
+            stopIdleAnimation();
+
+            // Discover idle animations if not already done
+            if (availableIdleAnimations.length === 0) {
+                await discoverIdleAnimations();
+            }
+
+            if (availableIdleAnimations.length === 0) {
+                console.log('No idle animations found');
+                return;
+            }
+
+            // Get current idle animation
+            const selectedIdle = availableIdleAnimations[currentIdleIndex];
+            
+            try {
+                const idlePath = `animations/${selectedIdle}`;
+                const animationClip = await loadBVHAnimationForVRM(idlePath, vrm);
+                
+                if (animationClip) {
+                    idleMotion = mixer.clipAction(animationClip, vrm.scene);
+                    idleMotion.setLoop(THREE.LoopRepeat);
+                    
+                    // Start with smooth fade in
+                    idleMotion.reset();
+                    idleMotion.fadeIn(0.8); // Slightly longer fade for idle
+                    idleMotion.play();
+                    isIdleAnimationActive = true;
+                    
+                    console.log(`Started idle animation: ${selectedIdle} (${currentIdleIndex + 1}/${availableIdleAnimations.length})`);
+                    updateStatus(`Idle: ${selectedIdle.replace('.bvh', '').replace(/_/g, ' ')}`);
+                    
+                    // Schedule next idle animation change (random interval between 10-30 seconds)
+                    if (availableIdleAnimations.length > 1) {
+                        const nextChangeTime = 10000 + Math.random() * 20000; // 10-30 seconds
+                        idleAnimationTimer = setTimeout(() => {
+                            if (isIdleAnimationActive && !currentMotion) {
+                                cycleToNextIdleAnimation();
+                            }
+                        }, nextChangeTime);
+                    }
+                }
+            } catch (error) {
+                console.warn('Could not load idle animation:', error);
+            }
+        }
+
+        async function cycleToNextIdleAnimation() {
+            if (!isIdleAnimationActive || availableIdleAnimations.length <= 1) {
+                return;
+            }
+
+            // Move to next idle animation
+            currentIdleIndex = (currentIdleIndex + 1) % availableIdleAnimations.length;
+            
+            // Smooth transition to new idle animation
+            const newIdleAnimation = availableIdleAnimations[currentIdleIndex];
+            
+            try {
+                const idlePath = `animations/${newIdleAnimation}`;
+                const animationClip = await loadBVHAnimationForVRM(idlePath, vrm);
+                
+                if (animationClip) {
+                    const newIdleAction = mixer.clipAction(animationClip, vrm.scene);
+                    newIdleAction.setLoop(THREE.LoopRepeat);
+                    
+                    // Crossfade from current idle to new idle
+                    const fadeTime = 1.0; // Longer fade for idle transitions
+                    
+                    if (idleMotion) {
+                        idleMotion.fadeOut(fadeTime);
+                    }
+                    
+                    newIdleAction.reset();
+                    newIdleAction.fadeIn(fadeTime);
+                    newIdleAction.play();
+                    
+                    idleMotion = newIdleAction;
+                    
+                    console.log(`Cycled to idle animation: ${newIdleAnimation} (${currentIdleIndex + 1}/${availableIdleAnimations.length})`);
+                    updateStatus(`Idle: ${newIdleAnimation.replace('.bvh', '').replace(/_/g, ' ')}`);
+                    
+                    // Schedule next change
+                    const nextChangeTime = 10000 + Math.random() * 20000; // 10-30 seconds
+                    idleAnimationTimer = setTimeout(() => {
+                        if (isIdleAnimationActive && !currentMotion) {
+                            cycleToNextIdleAnimation();
+                        }
+                    }, nextChangeTime);
+                }
+            } catch (error) {
+                console.warn('Could not cycle to next idle animation:', error);
+            }
+        }
+
+        function stopIdleAnimation() {
+            // Clear any scheduled idle changes
+            if (idleAnimationTimer) {
+                clearTimeout(idleAnimationTimer);
+                idleAnimationTimer = null;
+            }
+            
+            if (idleMotion) {
+                idleMotion.fadeOut(0.3); // Quick fade out
+                setTimeout(() => {
+                    if (idleMotion) {
+                        idleMotion.stop();
+                        idleMotion = null;
+                    }
+                }, 300);
+                isIdleAnimationActive = false;
+            }
+        }
+
+        function resumeIdleAnimationSmooth() {
+            if (!currentMotion && !isIdleAnimationActive) {
+                startIdleAnimation();
+            }
+        }
+
+        function get_motions() {
+            return availableMotions.map(motion => motion.replace('.bvh', ''));
+        }
+
+        function get_expressions_json() {
+            if (!vrm || !vrm.expressionManager) {
+                return '[]';
+            }
+            return JSON.stringify(Object.keys(vrm.expressionManager.expressionMap));
+        }
+
+        function get_motions_json() {
+            return JSON.stringify(availableMotions.map(motion => motion.replace('.bvh', '')));
+        }
+
+        // UI helper functions
+        function setExpressionFromSelect() {
+            const select = document.getElementById('expressionSelect');
+            if (select.value) {
+                set_expression(select.value);
+            }
+        }
+
+        function setMouthFromSlider() {
+            const slider = document.getElementById('mouthSlider');
+            const valueDisplay = document.getElementById('mouthValue');
+            const value = parseFloat(slider.value);
+            valueDisplay.textContent = value.toFixed(2);
+            set_mouth_y(value);
+        }
+
+        function setLightColorFromPicker() {
+            const colorPicker = document.getElementById('lightColorPicker');
+            set_light_color(colorPicker.value);
+        }
+
+        function resetLightColor() {
+            const colorPicker = document.getElementById('lightColorPicker');
+            colorPicker.value = '#ffffff';
+            set_light_color('#ffffff');
+        }
+
+        function setBackgroundFromInput() {
+            const input = document.getElementById('backgroundInput');
+            if (input.value.trim()) {
+                set_background(input.value.trim());
+            }
+        }
+
+        function setBackgroundColorFromPicker() {
+            const colorPicker = document.getElementById('backgroundColorPicker');
+            set_background(colorPicker.value);
+            // Also update the text input to show the color
+            document.getElementById('backgroundInput').value = colorPicker.value;
+        }
+
+        // UI Control Functions
+        let controlsVisible = false;
+        
+        function toggleControls() {
+            const controls = document.getElementById('controls');
+            const toggleText = document.getElementById('toggleControlsText');
+            
+            controlsVisible = !controlsVisible;
+            
+            if (controlsVisible) {
+                controls.classList.add('visible');
+                toggleText.textContent = 'Hide Controls';
+            } else {
+                controls.classList.remove('visible');
+                toggleText.textContent = 'Show Controls';
+            }
+            
+            hideContextMenu();
+        }
+        
+        function showContextMenu(event) {
+            const contextMenu = document.getElementById('contextMenu');
+            contextMenu.style.display = 'block';
+            contextMenu.style.left = event.clientX + 'px';
+            contextMenu.style.top = event.clientY + 'px';
+            
+            // Update toggle text based on current state
+            const toggleText = document.getElementById('toggleControlsText');
+            toggleText.textContent = controlsVisible ? 'Hide Controls' : 'Show Controls';
+        }
+        
+        function hideContextMenu() {
+            const contextMenu = document.getElementById('contextMenu');
+            contextMenu.style.display = 'none';
+        }
+
+        function doMotionFromSelect() {
+            const select = document.getElementById('motionSelect');
+            const loopCheckbox = document.getElementById('loopMotion');
+            if (select.value) {
+                do_motion(select.value.replace('.bvh', ''), loopCheckbox.checked);
+            }
+        }
+
+        function stopCurrentMotion() {
+            if (currentMotion) {
+                currentMotion.fadeOut(0.3);
+                setTimeout(() => {
+                    if (currentMotion) {
+                        currentMotion.stop();
+                        currentMotion = null;
+                    }
+                }, 300);
+                updateStatus('Motion stopped');
+                // Resume idle animation when motion is manually stopped
+                setTimeout(() => resumeIdleAnimationSmooth(), 400);
+            }
+        }
+
+        function resetPose() {
+            if (vrm && vrm.expressionManager) {
+                // Reset all expressions
+                for (const expression in vrm.expressionManager.expressionMap) {
+                    vrm.expressionManager.setValue(expression, 0.0);
+                }
+                vrm.expressionManager.update();
+            }
+            
+            if (currentMotion) {
+                currentMotion.fadeOut(0.3);
+                setTimeout(() => {
+            if (currentMotion) {
+                currentMotion.stop();
+                currentMotion = null;
+                    }
+                }, 300);
+            }
+            
+            if (idleMotion) {
+                idleMotion.fadeOut(0.3);
+                setTimeout(() => {
+                    if (idleMotion) {
+                        idleMotion.stop();
+                        idleMotion = null;
+                    }
+                    isIdleAnimationActive = false;
+                }, 300);
+            }
+            
+            updateStatus('Pose reset');
+            // Resume idle animation after reset with smooth transition
+            setTimeout(() => resumeIdleAnimationSmooth(), 500);
+        }
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const deltaTime = clock.getDelta();
+
+            // Update VRM
+            if (vrm) {
+                vrm.update(deltaTime);
+            }
+
+            // Update animation mixer
+            if (mixer) {
+                mixer.update(deltaTime);
+            }
+
+            // Update controls
+            if (controls) {
+                controls.update();
+            }
+
+            // Render
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Parse URL parameters
+        function getUrlParameter(name) {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get(name);
+        }
+
+        // Set background color from URL parameter
+        function setBackgroundFromUrl() {
+            const bgColor = getUrlParameter('bg') || getUrlParameter('background');
+            if (bgColor) {
+                try {
+                    // Support different color formats
+                    let color;
+                    if (bgColor.startsWith('#')) {
+                        // Hex color (e.g., #ff0000)
+                        color = new THREE.Color(bgColor);
+                    } else if (bgColor.startsWith('0x')) {
+                        // Hex with 0x prefix (e.g., 0xff0000)
+                        color = new THREE.Color(parseInt(bgColor, 16));
+                    } else if (bgColor.includes(',')) {
+                        // RGB values (e.g., 255,0,0)
+                        const [r, g, b] = bgColor.split(',').map(v => parseInt(v.trim()) / 255);
+                        color = new THREE.Color(r, g, b);
+                    } else {
+                        // CSS color names (e.g., red, blue, white)
+                        color = new THREE.Color(bgColor);
+                    }
+                    
+                    scene.background = color;
+                    console.log(`Background color set to: ${bgColor}`);
+                    updateStatus(`Background: ${bgColor}`);
+                } catch (error) {
+                    console.warn(`Invalid background color: ${bgColor}, using default black`);
+                    scene.background = new THREE.Color(0x000000);
+                }
+            } else {
+                // Default to black
+                scene.background = new THREE.Color(0x000000);
+            }
+        }
+
+        // Initialize everything
+        async function init() {
+            // Wait for modules to be loaded
+            while (!window.modulesLoaded) {
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+            
+            initScene();
+            
+            // Set background color from URL parameter
+            setBackgroundFromUrl();
+            
+            // Get model URL from parameters or use default
+            let modelUrl = getUrlParameter('model');
+            if (!modelUrl) {
+                modelUrl = 'models/model.vrm';
+                updateStatus('No model specified, loading default: models/model1.vrm');
+            }
+            
+            currentVrmUrl = modelUrl;
+            await loadVRM(modelUrl);
+
+            // Start animation loop
+            animate();
+        }
+
+        // Event listeners
+        window.addEventListener('resize', onWindowResize);
+        window.addEventListener('load', init);
+
+        // Context menu event listeners
+        document.addEventListener('contextmenu', (event) => {
+            event.preventDefault();
+            showContextMenu(event);
+        });
+
+        // Hide context menu when clicking elsewhere
+        document.addEventListener('click', (event) => {
+            const contextMenu = document.getElementById('contextMenu');
+            if (!contextMenu.contains(event.target)) {
+                hideContextMenu();
+            }
+        });
+
+        // Prevent context menu from closing when clicking inside it
+        document.addEventListener('contextmenu', (event) => {
+            const contextMenu = document.getElementById('contextMenu');
+            if (contextMenu.contains(event.target)) {
+                event.stopPropagation();
+            }
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (event) => {
+            // Toggle controls with 'C' key
+            if (event.key.toLowerCase() === 'c' && !event.ctrlKey && !event.altKey) {
+                toggleControls();
+            }
+            // Hide context menu with Escape key
+            if (event.key === 'Escape') {
+                hideContextMenu();
+            }
+        });
+
+        // Expose API functions to global scope for external access
+        window.set_expression = set_expression;
+        window.get_expressions = get_expressions;
+        window.set_mouth_y = set_mouth_y;
+        window.set_light_color = set_light_color;
+        window.set_background = set_background;
+        window.do_motion = do_motion;
+        window.get_motions = get_motions;
+        window.get_expressions_json = get_expressions_json;
+        window.get_motions_json = get_motions_json;
+    </script>
+</body>
+</html> 
