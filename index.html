@@ -235,6 +235,8 @@
         let currentVrmUrl = '';
         let availableExpressions = [];
         let availableMotions = [];
+        let groupedMotions = {};
+        let groupedExpressions = {};
         let currentMotion = null;
         let mixer = null;
         let idleMotion = null;
@@ -318,8 +320,19 @@
                 // Enable smoother crossfading by allowing multiple actions
                 mixer._actions = mixer._actions || [];
 
+                // Group expressions
+                const rawExpressions = Object.keys(vrm.expressionManager.expressionMap);
+                groupedExpressions = {};
+                rawExpressions.forEach(expr => {
+                    const baseName = expr.replace(/\d+$/, '');
+                    if (!groupedExpressions[baseName]) {
+                        groupedExpressions[baseName] = [];
+                    }
+                    groupedExpressions[baseName].push(expr);
+                });
+
                 // Get available expressions
-                availableExpressions = get_expressions();
+                availableExpressions = Object.keys(groupedExpressions).sort();
                 console.log('Available expressions:', availableExpressions);
                 updateExpressionSelect();
 
@@ -341,217 +354,39 @@
         // Load available motion files (BVH)
         async function loadAvailableMotions() {
             try {
-                // Try to dynamically discover animations by testing common patterns
-                const animationFiles = await discoverAnimationsFromPatterns();
+                const response = await fetch('animation_list.json');
+                if (!response.ok) throw new Error('Failed to load animation list');
                 
-                if (animationFiles.length > 0) {
-                    availableMotions = animationFiles;
-                    updateMotionSelect();
-                    updateStatus(`Loaded ${animationFiles.length} animations dynamically`);
-                } else {
-                    // Fallback to the known list if discovery doesn't work
-                    console.warn('Could not discover animations dynamically, using fallback list');
-                    await loadFallbackAnimations();
-                    return;
-                }
+                availableMotions = await response.json();
+                
+                // Group animations
+                groupAnimations();
+                
+                updateMotionSelect();
+                updateStatus(`Loaded ${availableMotions.length} animations`);
                 
                 // Discover and prepare idle animations
                 await discoverIdleAnimations();
                 
             } catch (error) {
-                console.warn('Failed to load animations dynamically, using fallback:', error);
-                await loadFallbackAnimations();
+                console.error('Failed to load animations:', error);
+                updateStatus('Error loading animations');
             }
         }
-
-        // Dynamically discover animations by testing patterns and known prefixes
-        async function discoverAnimationsFromPatterns() {
-            const discoveredAnimations = [];
-            
-            // Common animation prefixes and patterns to test
-            const patterns = [
-                // Actions
-                'action_attention_seeking', 'action_crawling', 'action_crouch', 'action_gaming',
-                'action_greeting1', 'action_greeting', 'action_jog', 'action_jump', 'action_laydown',
-                'action_pat', 'action_pickingup', 'action_run', 'action_standup', 'action_walk',
+        
+        function groupAnimations() {
+            groupedMotions = {};
+            availableMotions.forEach(filename => {
+                const name = filename.replace('.bvh', '');
+                // Strip trailing digits to get base name
+                const baseName = name.replace(/\d+$/, '');
                 
-                // Emotions
-                'admiration', 'admiration2', 'admiration3', 'amusement', 'amusement2', 'amusement3',
-                'anger', 'anger2', 'anger3', 'annoyance', 'annoyance1', 'approval', 'approval2', 'approval3',
-                'caring', 'caring1', 'confusion', 'confusion2', 'confusion3', 'curiosity', 'curiosity2', 'curiosity3',
-                'desire', 'desire1', 'desire2', 'disappointment', 'disappointment2', 'disapproval', 'disaproval1',
-                'disgust', 'disgust1', 'disgust2', 'embarrassment', 'excitement', 'excitement2', 'excitement3',
-                'fear', 'fear2', 'fear3', 'gratitude', 'grief', 'joy', 'joy2', 'joy3', 'love', 'love2', 'love3',
-                'nervousness', 'nervousnes3', 'nervousness2', 'optimism', 'pride', 'pride2', 'realization',
-                'relief', 'relief1', 'remorse', 'remorse2', 'remorse3', 'sadness', 'sadness2', 'surprise', 'surprise2',
-                
-                // Dances
-                'dance_1', 'dance_2', 'dance_backup', 'dance_dab', 'dance_gangnam_style', 'dance_headdrop',
-                'dance_marachinostep', 'dance_northern_soul_spin', 'dance_ontop', 'dance_pushback', 'dance_rumba',
-                
-                // Exercises
-                'exercise_crunch', 'exercise_crunches', 'exercise_jogging', 'exercise_jumping_jacks',
-                
-                // Hit areas
-                'hitarea_butt', 'hitarea_chest', 'hitarea_foot', 'hitarea_groin', 'hitarea_hands', 'hitarea_head', 'hitarea_leg',
-                
-                // Reactions
-                'reaction_groinhit', 'reaction_headshot',
-                
-                // Idle animations (most important for our use case)
-                'neutral_idle', 'neutral_idle2', 'neutral', 'neutral2', 'neutral3', 'neutral4',
-                'sit_idle', 'sit_idle2', 'sit_idle3', 'sit_idle4',
-                'kneel_idle', 'kneel_idle2',
-                'laying_idle', 'laying_idle2', 'laying_idle3'
-            ];
-            
-            // Test each pattern to see if the file exists
-            const testPromises = patterns.map(async (pattern) => {
-                try {
-                    const response = await fetch(`animations/${pattern}.bvh`, { method: 'HEAD' });
-                    if (response.ok) {
-                        return `${pattern}.bvh`;
-                    }
-                } catch (error) {
-                    // File doesn't exist or can't be accessed
+                if (!groupedMotions[baseName]) {
+                    groupedMotions[baseName] = [];
                 }
-                return null;
+                groupedMotions[baseName].push(name);
             });
-            
-            const results = await Promise.all(testPromises);
-            const foundAnimations = results.filter(result => result !== null);
-            
-            console.log(`Discovered ${foundAnimations.length} animations dynamically`);
-            return foundAnimations;
-        }
-
-        // Fallback function with the original hardcoded list
-        async function loadFallbackAnimations() {
-            const animationFiles = [
-                'action_attention_seeking.bvh',
-                'action_crawling.bvh',
-                'action_crouch.bvh',
-                'action_gaming.bvh',
-                'action_greeting1.bvh',
-                'action_greeting.bvh',
-                'action_jog.bvh',
-                'action_jump.bvh',
-                'action_laydown.bvh',
-                'action_pat.bvh',
-                'action_pickingup.bvh',
-                'action_run.bvh',
-                'action_standup.bvh',
-                'action_walk.bvh',
-                'admiration2.bvh',
-                'admiration3.bvh',
-                'admiration.bvh',
-                'amusement2.bvh',
-                'amusement3.bvh',
-                'amusement.bvh',
-                'anger2.bvh',
-                'anger3.bvh',
-                'anger.bvh',
-                'annoyance1.bvh',
-                'annoyance.bvh',
-                'approval2.bvh',
-                'approval3.bvh',
-                'approval.bvh',
-                'caring1.bvh',
-                'caring.bvh',
-                'confusion2.bvh',
-                'confusion3.bvh',
-                'confusion.bvh',
-                'curiosity2.bvh',
-                'curiosity3.bvh',
-                'curiosity.bvh',
-                'dance_1.bvh',
-                'dance_2.bvh',
-                'dance_backup.bvh',
-                'dance_dab.bvh',
-                'dance_gangnam_style.bvh',
-                'dance_headdrop.bvh',
-                'dance_marachinostep.bvh',
-                'dance_northern_soul_spin.bvh',
-                'dance_ontop.bvh',
-                'dance_pushback.bvh',
-                'dance_rumba.bvh',
-                'desire1.bvh',
-                'desire2.bvh',
-                'desire.bvh',
-                'disappointment2.bvh',
-                'disappointment.bvh',
-                'disapproval.bvh',
-                'disaproval1.bvh',
-                'disgust1.bvh',
-                'disgust2.bvh',
-                'disgust.bvh',
-                'embarrassment.bvh',
-                'excitement2.bvh',
-                'excitement3.bvh',
-                'excitement.bvh',
-                'exercise_crunch.bvh',
-                'exercise_crunches.bvh',
-                'exercise_jogging.bvh',
-                'exercise_jumping_jacks.bvh',
-                'fear2.bvh',
-                'fear3.bvh',
-                'fear.bvh',
-                'gratitude.bvh',
-                'grief.bvh',
-                'hitarea_butt.bvh',
-                'hitarea_chest.bvh',
-                'hitarea_foot.bvh',
-                'hitarea_groin.bvh',
-                'hitarea_hands.bvh',
-                'hitarea_head.bvh',
-                'hitarea_leg.bvh',
-                'joy2.bvh',
-                'joy3.bvh',
-                'joy.bvh',
-                'kneel_idle2.bvh',
-                'kneel_idle.bvh',
-                'laying_idle2.bvh',
-                'laying_idle3.bvh',
-                'laying_idle.bvh',
-                'love2.bvh',
-                'love3.bvh',
-                'love.bvh',
-                'nervousnes3.bvh',
-                'nervousness2.bvh',
-                'nervousness.bvh',
-                'neutral2.bvh',
-                'neutral3.bvh',
-                'neutral4.bvh',
-                'neutral.bvh',
-                'neutral_idle2.bvh',
-                'neutral_idle.bvh',
-                'optimism.bvh',
-                'pride2.bvh',
-                'pride.bvh',
-                'reaction_groinhit.bvh',
-                'reaction_headshot.bvh',
-                'realization.bvh',
-                'relief1.bvh',
-                'relief.bvh',
-                'remorse2.bvh',
-                'remorse3.bvh',
-                'remorse.bvh',
-                'sadness2.bvh',
-                'sadness.bvh',
-                'sit_idle2.bvh',
-                'sit_idle3.bvh',
-                'sit_idle4.bvh',
-                'sit_idle.bvh',
-                'surprise2.bvh',
-                'surprise.bvh'
-            ];
-            
-            availableMotions = animationFiles;
-            updateMotionSelect();
-            updateStatus(`Loaded ${animationFiles.length} animations (fallback)`);
-            
-            // Discover and prepare idle animations
-            await discoverIdleAnimations();
+            console.log('Grouped motions:', groupedMotions);
         }
 
         // Update UI selects
@@ -570,12 +405,14 @@
         function updateMotionSelect() {
             const select = document.getElementById('motionSelect');
             select.innerHTML = '<option value="">Select motion...</option>';
-            availableMotions.forEach(motion => {
+            
+            const keys = Object.keys(groupedMotions).sort();
+            
+            keys.forEach(key => {
                 const option = document.createElement('option');
-                option.value = motion;
-                // Format the motion name for display (remove .bvh and format)
-                const displayName = motion.replace('.bvh', '')
-                    .replace(/_/g, ' ')
+                option.value = key;
+                // Format the motion name for display
+                const displayName = key.replace(/_/g, ' ')
                     .replace(/\b\w/g, l => l.toUpperCase());
                 option.textContent = displayName;
                 select.appendChild(option);
@@ -594,17 +431,27 @@
             }
 
             try {
+                // Determine target expression
+                let targetExpression = expressionName;
+                
+                // Check if it is a group
+                if (groupedExpressions[expressionName]) {
+                    const variants = groupedExpressions[expressionName];
+                    targetExpression = variants[Math.floor(Math.random() * variants.length)];
+                    console.log(`Selected random variant for expression group ${expressionName}: ${targetExpression}`);
+                }
+
                 // Reset all expressions first
                 for (const expression in vrm.expressionManager.expressionMap) {
                     vrm.expressionManager.setValue(expression, 0.0);
                 }
 
                 // Set the requested expression
-                vrm.expressionManager.setValue(expressionName, weight);
+                vrm.expressionManager.setValue(targetExpression, weight);
                 vrm.expressionManager.update();
                 
-                console.log(`Set expression: ${expressionName} with weight: ${weight}`);
-                updateStatus(`Expression set: ${expressionName}`);
+                console.log(`Set expression: ${targetExpression} with weight: ${weight}`);
+                updateStatus(`Expression set: ${targetExpression}`);
                 return true;
             } catch (error) {
                 console.error('Error setting expression:', error);
@@ -614,11 +461,7 @@
         }
 
         function get_expressions() {
-            if (!vrm || !vrm.expressionManager) {
-                return [];
-            }
-
-            return Object.keys(vrm.expressionManager.expressionMap);
+            return availableExpressions;
         }
 
         function set_mouth_y(value) {
@@ -755,10 +598,24 @@
             }
 
             try {
-                // Load and play BVH file with proper bone mapping
-                const bvhPath = `animations/${motionName}.bvh`;
+                // Determine target file
+                let targetFile = '';
                 
-                updateStatus(`Loading motion: ${motionName}...`);
+                // Check if it is a group
+                if (groupedMotions[motionName]) {
+                    const variants = groupedMotions[motionName];
+                    const randomVariant = variants[Math.floor(Math.random() * variants.length)];
+                    targetFile = randomVariant + '.bvh';
+                    console.log(`Selected random variant for group ${motionName}: ${randomVariant}`);
+                } else {
+                    // Not a group, treat as exact file
+                    targetFile = motionName + '.bvh';
+                }
+
+                // Load and play BVH file with proper bone mapping
+                const bvhPath = `animations/${targetFile}`;
+                
+                updateStatus(`Loading motion: ${targetFile.replace('.bvh', '')}...`);
                 
                 // Use the proper BVH loading function that handles bone mapping
                 loadBVHAnimationForVRM(bvhPath, vrm).then((animationClip) => {
@@ -1083,6 +940,10 @@
         }
 
         function get_motions() {
+            // Return keys of grouped motions if available, otherwise available motions
+            if (Object.keys(groupedMotions).length > 0) {
+                return Object.keys(groupedMotions).sort();
+            }
             return availableMotions.map(motion => motion.replace('.bvh', ''));
         }
 
@@ -1090,10 +951,13 @@
             if (!vrm || !vrm.expressionManager) {
                 return '[]';
             }
-            return JSON.stringify(Object.keys(vrm.expressionManager.expressionMap));
+            return JSON.stringify(availableExpressions);
         }
 
         function get_motions_json() {
+            if (Object.keys(groupedMotions).length > 0) {
+                return JSON.stringify(Object.keys(groupedMotions).sort());
+            }
             return JSON.stringify(availableMotions.map(motion => motion.replace('.bvh', '')));
         }
 
